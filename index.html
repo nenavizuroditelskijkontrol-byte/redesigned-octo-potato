@@ -1,0 +1,938 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0d0810">
+<title>Сосиска — физика (мобильная)</title>
+<style>
+  *{ -webkit-tap-highlight-color: transparent; }
+  html,body{
+    margin:0;height:100%;overflow:hidden;background:#0d0810;
+    font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+    touch-action:none;overscroll-behavior:none;
+    -webkit-user-select:none;user-select:none;
+  }
+  canvas{display:block;touch-action:none;}
+
+  /* Мобильные кнопки */
+  #mobileUI{
+    position:fixed;inset:0;pointer-events:none;z-index:10;
+    display:none;
+  }
+  #mobileUI.show{ display:block; }
+
+  .btn{
+    position:absolute;pointer-events:auto;
+    display:flex;align-items:center;justify-content:center;
+    flex-direction:column;gap:2px;
+    background:rgba(255,255,255,0.10);
+    border:2px solid rgba(255,255,255,0.22);
+    color:#fff;border-radius:50%;
+    font-weight:700;font-size:13px;
+    backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
+    transition:transform .08s,background .12s;
+    width:72px;height:72px;
+    box-shadow:0 4px 14px rgba(0,0,0,.35);
+  }
+  .btn:active{ transform:scale(.92); background:rgba(255,220,120,0.30); }
+  .btn .ico{ font-size:24px; line-height:1; }
+  .btn .lbl{ font-size:10px; opacity:.85; letter-spacing:.3px; }
+
+  #btnRestart{ right:16px; bottom:calc(16px + env(safe-area-inset-bottom)); }
+  #btnPause{   right:16px; bottom:calc(100px + env(safe-area-inset-bottom)); }
+
+  /* Подсказка "потяни" для мобильных */
+  #hint{
+    position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom));
+    transform:translateX(-50%);
+    color:#ffe38a;font-weight:700;font-size:15px;letter-spacing:.4px;
+    text-shadow:0 2px 8px rgba(0,0,0,.7);
+    background:rgba(0,0,0,.35);padding:8px 16px;border-radius:20px;
+    border:1px solid rgba(255,220,120,.35);
+    pointer-events:none;opacity:0;transition:opacity .3s;
+    z-index:9;white-space:nowrap;
+  }
+  #hint.show{ opacity:.95; animation:pulse 1.4s ease-in-out infinite; }
+  @keyframes pulse{ 0%,100%{transform:translateX(-50%) scale(1);} 50%{transform:translateX(-50%) scale(1.05);} }
+
+  /* Индикатор-подсказка направления */
+  #aimHint{
+    position:fixed;pointer-events:none;z-index:8;
+    width:60px;height:60px;border-radius:50%;
+    border:2px dashed rgba(255,220,120,.6);
+    transform:translate(-50%,-50%);
+    display:none;
+  }
+  #aimHint.show{ display:block; }
+
+  /* Поворот-предупреждение */
+  #rotateMsg{
+    position:fixed;inset:0;z-index:20;display:none;
+    align-items:center;justify-content:center;text-align:center;
+    background:#0d0810;color:#ffe38a;font-weight:700;font-size:18px;
+    padding:24px;line-height:1.5;
+  }
+  @media (orientation:portrait){
+    #rotateMsg.landscapeOnly{ display:flex; }
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="mobileUI">
+  <button class="btn" id="btnRestart" aria-label="Заново">
+    <span class="ico">⟳</span><span class="lbl">Заново</span>
+  </button>
+  <button class="btn" id="btnPause" aria-label="Пауза">
+    <span class="ico">❚❚</span><span class="lbl">Пауза</span>
+  </button>
+</div>
+
+<div id="hint">👆 Потяни сосиску и отпусти</div>
+<div id="aimHint"></div>
+
+<div id="rotateMsg" class="landscapeOnly">
+  Поверни телефон горизонтально 📱↻<br>так играть удобнее
+</div>
+
+<script>
+(() => {
+'use strict';
+
+// ============ КАНВАС ============
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+const W = 900, H = 600;
+let scale = 1, offX = 0, offY = 0, dpr = 1;
+
+// Определяем "мобильность"
+const isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+                 || ('ontouchstart' in window && window.innerWidth < 1100);
+
+function resize(){
+  dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const cw = window.innerWidth, ch = window.innerHeight;
+  canvas.width  = Math.floor(cw * dpr);
+  canvas.height = Math.floor(ch * dpr);
+  canvas.style.width  = cw + 'px';
+  canvas.style.height = ch + 'px';
+  scale = Math.min(cw / W, ch / H);
+  offX = (cw - W * scale) / 2;
+  offY = (ch - H * scale) / 2;
+}
+window.addEventListener('resize', resize);
+window.addEventListener('orientationchange', () => setTimeout(resize, 120));
+resize();
+
+const clamp = (v,a,b) => v < a ? a : (v > b ? b : v);
+const rnd   = (a,b) => a + Math.random() * (b - a);
+function toWorld(cx, cy){ return { x: (cx - offX) / scale, y: (cy - offY) / scale }; }
+
+// ============ ПАРАМЕТРЫ ============
+const R = 15;
+const N = 7;
+const SEG = 24;
+const GRAV = 0.55;
+const ITER = 10;
+
+// На мобильных — чуть больше "хватки"
+const GRAB_RADIUS = isMobile ? 90 : 70;
+
+// ============ УРОВНИ ============
+const LEVELS = [
+  {
+    start: {x: 60, y: 500},
+    platforms: [
+      {x:180, y:450, w:170, h:20},
+      {x:470, y:380, w:170, h:20},
+      {x:180, y:280, w:150, h:20},
+      {x:680, y:470, w:170, h:20},
+    ],
+    drops: [
+      {x:265,y:410},{x:555,y:340},{x:255,y:240},{x:765,y:430},{x:520,y:520}
+    ],
+    spikes: [],
+  },
+  {
+    start: {x: 60, y: 520},
+    platforms: [
+      {x:150, y:470, w:200, h:20},
+      {x:430, y:400, w:130, h:20},
+      {x:640, y:320, w:180, h:20},
+      {x:280, y:290, w:130, h:20},
+    ],
+    drops: [
+      {x:250,y:430},{x:495,y:360},{x:730,y:280},{x:345,y:250},{x:820,y:520},{x:70,y:230}
+    ],
+    spikes: [
+      {x:330, y:545, w:150, h:15},
+      {x:610, y:545, w:220, h:15},
+    ],
+  },
+  {
+    start: {x: 60, y: 520},
+    platforms: [
+      {x:120, y:460, w:120, h:20},
+      {x:320, y:400, w:120, h:20},
+      {x:520, y:340, w:120, h:20},
+      {x:720, y:280, w:140, h:20},
+      {x:360, y:200, w:200, h:20},
+    ],
+    drops: [
+      {x:180,y:420},{x:380,y:360},{x:580,y:300},{x:790,y:240},
+      {x:460,y:160},{x:90,y:300},{x:830,y:520}
+    ],
+    spikes: [
+      {x:300, y:545, w:250, h:15},
+      {x:650, y:545, w:250, h:15},
+      {x:320, y:385, w:50,  h:15},
+    ],
+  },
+  {
+    start: {x: 210, y: 490},
+    platforms: [
+      {x:120, y:420, w:110, h:18},
+      {x:320, y:360, w:110, h:18},
+      {x:520, y:300, w:110, h:18},
+      {x:720, y:240, w:130, h:18},
+      {x:250, y:200, w:160, h:18},
+      {x:560, y:130, w:180, h:18},
+    ],
+    drops: [
+      {x:175,y:380},{x:375,y:320},{x:575,y:260},{x:785,y:200},
+      {x:330,y:160},{x:650,y:90},{x:60,y:300},{x:850,y:520}
+    ],
+    spikes: [
+      {x:0,   y:545, w:150, h:15},
+      {x:450, y:545, w:250, h:15},
+      {x:800, y:545, w:100, h:15},
+    ],
+  },
+];
+
+// ============ СОСТОЯНИЕ ============
+let sausage = [];
+let constraints = [];
+let platforms = [], drops = [], spikes = [], particles = [];
+
+let levelIndex = 0;
+let flingsLeft = 0;
+let state = 'play';
+let stateTimer = 0;
+let idleTimer = 0;
+let shake = 0;
+let time = 0;
+let hasThrown = false;
+let paused = false;
+
+const pointer = { x:0, y:0, lastX:0, lastY:0, vx:0, vy:0, down:false, grabbed:-1 };
+
+// ============ ВИБРО ============
+function vibrate(ms){
+  if (navigator.vibrate) { try { navigator.vibrate(ms); } catch(e){} }
+}
+
+// ============ СОЗДАНИЕ ============
+function createSausage(sx, sy){
+  sausage = [];
+  for (let i = 0; i < N; i++){
+    const x = sx + i * SEG;
+    sausage.push({ x, y: sy, px: x, py: sy, r: R, pinned: false });
+  }
+  constraints = [];
+  for (let i = 0; i < N - 1; i++)
+    constraints.push({ a:i, b:i+1, len:SEG, stiff:1 });
+  for (let i = 0; i < N - 2; i++)
+    constraints.push({ a:i, b:i+2, len:SEG*2, stiff:0.4 });
+  constraints.push({ a:0, b:N-1, len:SEG*(N-1), stiff:0.10 });
+  constraints.push({ a:0, b:(N-1)>>1, len:SEG*((N-1)>>1), stiff:0.08 });
+}
+
+function makeWalls(){
+  return [
+    { x:-500, y:-600, w:500,    h:1200 },
+    { x:W,    y:-600, w:500,    h:1200 },
+    { x:-500, y:-600, w:W+1000, h:480  },
+    { x:-500, y:H-40, w:W+1000, h:600  },
+  ];
+}
+
+function loadLevel(i){
+  levelIndex = i;
+  const L = LEVELS[i];
+  platforms = makeWalls().concat(L.platforms.map(p => ({...p})));
+  drops  = L.drops.map(d => ({ x:d.x, y:d.y, got:false, ph: Math.random()*Math.PI*2 }));
+  spikes = L.spikes.map(s => ({...s}));
+  createSausage(L.start.x, L.start.y);
+  flingsLeft = drops.length + 2;
+  particles = [];
+  state = 'play';
+  stateTimer = 0;
+  idleTimer = 0;
+  shake = 0;
+  hasThrown = false;
+  pointer.down = false;
+  pointer.grabbed = -1;
+  paused = false;
+  updateHint();
+}
+
+// ============ ФИЗИКА ============
+function solveConstraints(){
+  for (let k = 0; k < constraints.length; k++){
+    const c = constraints[k];
+    const a = sausage[c.a], b = sausage[c.b];
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const d = Math.sqrt(dx*dx + dy*dy);
+    if (d < 1e-4) continue;
+    const wa = a.pinned ? 0 : 1;
+    const wb = b.pinned ? 0 : 1;
+    const ws = wa + wb;
+    if (ws === 0) continue;
+    const diff = ((d - c.len) / d) * c.stiff;
+    const kx = dx * diff, ky = dy * diff;
+    if (wa){ a.x += kx * (wa/ws); a.y += ky * (wa/ws); }
+    if (wb){ b.x -= kx * (wb/ws); b.y -= ky * (wb/ws); }
+  }
+}
+
+function collideWorld(p){
+  for (let i = 0; i < platforms.length; i++){
+    const r = platforms[i];
+    const cx = clamp(p.x, r.x, r.x + r.w);
+    const cy = clamp(p.y, r.y, r.y + r.h);
+    let dx = p.x - cx, dy = p.y - cy;
+    const d2 = dx*dx + dy*dy;
+    if (d2 > p.r * p.r) continue;
+
+    let nx, ny, pen;
+    if (d2 > 1e-6){
+      const d = Math.sqrt(d2);
+      nx = dx/d; ny = dy/d; pen = p.r - d;
+    } else {
+      const l = p.x - r.x, rr = r.x + r.w - p.x;
+      const t = p.y - r.y, bb = r.y + r.h - p.y;
+      const m = Math.min(l, rr, t, bb);
+      if (m === t)      { nx = 0;  ny = -1; pen = t  + p.r; }
+      else if (m === bb){ nx = 0;  ny =  1; pen = bb + p.r; }
+      else if (m === l) { nx = -1; ny =  0; pen = l  + p.r; }
+      else              { nx = 1;  ny =  0; pen = rr + p.r; }
+    }
+
+    p.x += nx * pen; p.y += ny * pen;
+    p.px += nx * pen; p.py += ny * pen;
+
+    let vx = p.x - p.px, vy = p.y - p.py;
+    const vn = vx*nx + vy*ny;
+    if (vn < 0){
+      const tx = -ny, ty = nx;
+      const vt = vx*tx + vy*ty;
+      const nvn = -vn * 0.25;
+      const nvt = vt * 0.92;
+      vx = nx*nvn + tx*nvt;
+      vy = ny*nvn + ty*nvt;
+      p.px = p.x - vx;
+      p.py = p.y - vy;
+    }
+  }
+}
+
+function physicsStep(){
+  for (let i = 0; i < sausage.length; i++){
+    const p = sausage[i];
+    if (p.pinned){ p.px = p.x; p.py = p.y; continue; }
+    const vx = (p.x - p.px) * 0.996;
+    const vy = (p.y - p.py) * 0.996;
+    p.px = p.x; p.py = p.y;
+    p.x += vx;
+    p.y += vy + GRAV;
+  }
+  for (let it = 0; it < ITER; it++) solveConstraints();
+  for (let i = 0; i < sausage.length; i++)
+    if (!sausage[i].pinned) collideWorld(sausage[i]);
+  for (let it = 0; it < 3; it++) solveConstraints();
+  for (let i = 0; i < sausage.length; i++)
+    if (!sausage[i].pinned) collideWorld(sausage[i]);
+}
+
+// ============ ЧАСТИЦЫ ============
+function burst(x, y, color, n){
+  for (let i = 0; i < n; i++){
+    if (particles.length > 400) break;
+    const a = Math.random() * Math.PI * 2;
+    const sp = rnd(1, 6.5);
+    particles.push({
+      x, y,
+      vx: Math.cos(a)*sp,
+      vy: Math.sin(a)*sp - 1.8,
+      life: 1, color, size: rnd(2, 5)
+    });
+  }
+}
+function updateParticles(){
+  for (let i = particles.length - 1; i >= 0; i--){
+    const p = particles[i];
+    p.vy += 0.25; p.vx *= 0.98;
+    p.x += p.vx; p.y += p.vy;
+    p.life -= 0.018;
+    if (p.life <= 0) particles.splice(i, 1);
+  }
+}
+
+// ============ ЛОГИКА ============
+function remainingDrops(){ return drops.filter(d => !d.got).length; }
+function isResting(){
+  let s = 0;
+  for (const p of sausage) s += Math.abs(p.x - p.px) + Math.abs(p.y - p.py);
+  return s < 1.5;
+}
+
+function checkDrops(){
+  for (const d of drops){
+    if (d.got) continue;
+    for (const p of sausage){
+      const dx = p.x - d.x, dy = p.y - d.y;
+      if (dx*dx + dy*dy < (R + 13) * (R + 13)){
+        d.got = true;
+        burst(d.x, d.y, '#ffd93d', 16);
+        shake = Math.max(shake, 4);
+        vibrate(20);
+        break;
+      }
+    }
+  }
+  if (remainingDrops() === 0 && state === 'play'){
+    state = 'levelwin';
+    stateTimer = 0;
+    burst(W/2, H/2, '#7bed9f', 40);
+    shake = 8;
+    vibrate([40, 30, 60]);
+  }
+}
+
+function die(){
+  state = 'dead';
+  stateTimer = 0;
+  shake = 15;
+  vibrate(120);
+  for (const p of sausage) burst(p.x, p.y, '#c85a3a', 5);
+}
+
+function checkSpikes(){
+  const lim = R * 0.6;
+  for (const s of spikes){
+    for (const p of sausage){
+      const cx = clamp(p.x, s.x, s.x + s.w);
+      const cy = clamp(p.y, s.y, s.y + s.h);
+      const dx = p.x - cx, dy = p.y - cy;
+      if (dx*dx + dy*dy < lim*lim){ die(); return; }
+    }
+  }
+}
+
+// ============ UPDATE ============
+function update(){
+  time++;
+
+  if (paused) return;
+
+  if (pointer.down){
+    pointer.vx = pointer.vx * 0.5 + (pointer.x - pointer.lastX) * 0.5;
+    pointer.vy = pointer.vy * 0.5 + (pointer.y - pointer.lastY) * 0.5;
+  }
+  pointer.lastX = pointer.x;
+  pointer.lastY = pointer.y;
+
+  // Индикатор направления для мобильных
+  if (pointer.down && pointer.grabbed >= 0){
+    const p = sausage[pointer.grabbed];
+    aimHint.style.left = (offX + (p.x + pointer.vx * 3) * scale) + 'px';
+    aimHint.style.top  = (offY + (p.y + pointer.vy * 3) * scale) + 'px';
+    aimHint.classList.add('show');
+  } else {
+    aimHint.classList.remove('show');
+  }
+
+  if (state === 'play'){
+    if (pointer.down && pointer.grabbed >= 0){
+      const p = sausage[pointer.grabbed];
+      p.x = pointer.x; p.y = pointer.y;
+      p.px = p.x;     p.py = p.y;
+    }
+
+    physicsStep();
+    checkDrops();
+    if (state === 'play') checkSpikes();
+
+    if (state === 'play' && flingsLeft <= 0 && !pointer.down && remainingDrops() > 0){
+      idleTimer++;
+      if (isResting() || idleTimer > 260){
+        state = 'lose';
+        stateTimer = 0;
+      }
+    } else {
+      idleTimer = 0;
+    }
+  } else {
+    stateTimer++;
+    if (state === 'levelwin' && stateTimer > 70){
+      if (levelIndex + 1 < LEVELS.length) loadLevel(levelIndex + 1);
+      else { state = 'gamewin'; stateTimer = 0; }
+    }
+    if (state === 'dead' && stateTimer > 60)  loadLevel(levelIndex);
+    if (state === 'lose' && stateTimer > 80)  loadLevel(levelIndex);
+  }
+
+  updateParticles();
+  if (shake > 0) shake *= 0.88;
+  if (shake < 0.2) shake = 0;
+}
+
+// ============ ВВОД (мышь + тач) ============
+function pointerDown(clientX, clientY){
+  const w = toWorld(clientX, clientY);
+  pointer.x = w.x; pointer.y = w.y;
+  pointer.lastX = w.x; pointer.lastY = w.y;
+  pointer.vx = 0; pointer.vy = 0;
+  pointer.down = true;
+
+  if (state === 'gamewin'){
+    levelIndex = 0;
+    loadLevel(0);
+    return;
+  }
+  if (state !== 'play') return;
+
+  let best = -1, bd = 1e9;
+  for (let i = 0; i < sausage.length; i++){
+    const d = Math.hypot(sausage[i].x - w.x, sausage[i].y - w.y);
+    if (d < bd){ bd = d; best = i; }
+  }
+  if (best >= 0 && bd < GRAB_RADIUS){
+    pointer.grabbed = best;
+    sausage[best].pinned = true;
+    vibrate(15);
+  }
+}
+
+function pointerMove(clientX, clientY){
+  const w = toWorld(clientX, clientY);
+  pointer.x = w.x;
+  pointer.y = w.y;
+}
+
+function pointerUp(){
+  if (!pointer.down) return;
+  pointer.down = false;
+
+  if (pointer.grabbed >= 0){
+    const p = sausage[pointer.grabbed];
+    p.pinned = false;
+    pointer.grabbed = -1;
+
+    const sp = Math.hypot(pointer.vx, pointer.vy);
+    if (sp > 3 && state === 'play'){
+      let vx = pointer.vx, vy = pointer.vy;
+      const MAXV = 38;
+      const s = Math.hypot(vx, vy);
+      if (s > MAXV){ vx = vx / s * MAXV; vy = vy / s * MAXV; }
+      for (const q of sausage){ q.px = q.x - vx; q.py = q.y - vy; }
+      flingsLeft--;
+      hasThrown = true;
+      burst(p.x, p.y, '#ffd93d', 6);
+      vibrate(30);
+    }
+  }
+  aimHint.classList.remove('show');
+}
+
+// Мышь
+canvas.addEventListener('mousedown', e => { e.preventDefault(); pointerDown(e.clientX, e.clientY); });
+window.addEventListener('mousemove', e => pointerMove(e.clientX, e.clientY));
+window.addEventListener('mouseup', pointerUp);
+window.addEventListener('blur', pointerUp);
+
+// Тач (мультитач-безопасно)
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  if (e.touches.length === 0) return;
+  const t = e.touches[0];
+  pointerDown(t.clientX, t.clientY);
+}, { passive: false });
+
+canvas.addEventListener('touchmove', e => {
+  e.preventDefault();
+  if (e.touches.length === 0) return;
+  const t = e.touches[0];
+  pointerMove(t.clientX, t.clientY);
+}, { passive: false });
+
+canvas.addEventListener('touchend', e => {
+  e.preventDefault();
+  pointerUp();
+}, { passive: false });
+
+canvas.addEventListener('touchcancel', e => {
+  e.preventDefault();
+  pointerUp();
+}, { passive: false });
+
+// ============ UI КНОПКИ ============
+const mobileUI = document.getElementById('mobileUI');
+const hint = document.getElementById('hint');
+const aimHint = document.getElementById('aimHint');
+const btnRestart = document.getElementById('btnRestart');
+const btnPause = document.getElementById('btnPause');
+
+if (isMobile) mobileUI.classList.add('show');
+
+btnRestart.addEventListener('click', () => {
+  vibrate(20);
+  loadLevel(levelIndex);
+});
+
+btnPause.addEventListener('click', () => {
+  vibrate(15);
+  paused = !paused;
+  btnPause.querySelector('.ico').textContent = paused ? '▶' : '❚❚';
+  btnPause.querySelector('.lbl').textContent = paused ? 'Дальше' : 'Пауза';
+  updateHint();
+});
+
+function updateHint(){
+  if (!isMobile) { hint.classList.remove('show'); return; }
+  if (state === 'play' && !hasThrown && !paused){
+    hint.classList.add('show');
+    hint.textContent = '👆 Потяни сосиску и отпусти';
+  } else if (paused){
+    hint.classList.add('show');
+    hint.textContent = '⏸ Пауза — нажми ▶ чтобы продолжить';
+  } else {
+    hint.classList.remove('show');
+  }
+}
+
+// Показ подсказки после загрузки и на старте каждого уровня
+setTimeout(() => { if (isMobile) hint.classList.add('show'); }, 600);
+setInterval(updateHint, 500);
+
+// ============ РИСОВАНИЕ ============
+function roundRect(x, y, w, h, r){
+  r = Math.min(r, Math.abs(w)/2, Math.abs(h)/2);
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y); ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r); ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h); ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r); ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+
+function drawBackground(){
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0,    '#1a1024');
+  g.addColorStop(0.55, '#2a1526');
+  g.addColorStop(1,    '#3d1f1c');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+
+  const rg = ctx.createRadialGradient(W/2, H + 100, 40, W/2, H + 100, 720);
+  rg.addColorStop(0, 'rgba(255,120,40,0.28)');
+  rg.addColorStop(1, 'rgba(255,120,40,0)');
+  ctx.fillStyle = rg;
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+  ctx.lineWidth = 1;
+  for (let x = 0; x <= W; x += 60){
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+  }
+  for (let y = 0; y <= H; y += 60){
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+  }
+}
+
+function drawPlatforms(){
+  for (const r of platforms){
+    if (r.x > W || r.x + r.w < 0) continue;
+    ctx.fillStyle = '#3a2432';
+    roundRect(r.x, r.y, r.w, Math.min(r.h, 420), 10);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255,170,120,0.30)';
+    roundRect(r.x + 3, r.y + 2, r.w - 6, 4, 2);
+    ctx.fill();
+  }
+}
+
+function drawSpikes(){
+  for (const s of spikes){
+    const n = Math.max(1, Math.round(s.w / 16));
+    const step = s.w / n;
+    ctx.beginPath();
+    ctx.moveTo(s.x, s.y + s.h);
+    for (let i = 0; i < n; i++){
+      const x0 = s.x + i * step;
+      ctx.lineTo(x0 + step/2, s.y);
+      ctx.lineTo(x0 + step,   s.y + s.h);
+    }
+    ctx.closePath();
+    ctx.fillStyle = '#8e9bb3';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
+}
+
+function drawDrops()
+  for (const d of drops){
+    if (d.got) continue;
+    const y = d.y + Math.sin(time * 0.06 + d.ph) * 3;
+    ctx.save();
+    ctx.shadowColor = 'rgba(255,210,60,0.85)';
+    ctx.shadowBlur = 18;
+    const g = ctx.createRadialGradient(d.x - 4, y - 4, 2, d.x, y, 13);
+    g.addColorStop(0,   '#fff8b8');
+    g.addColorStop(0.5, '#ffd93d');
+    g.addColorStop(1,   '#dfa400');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(d.x, y, 12, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    ctx.beginPath(); ctx.arc(d.x - 3.5, y - 4.5, 2.6, 0, Math.PI * 2); ctx.fill();
+  }
+}
+
+function sausagePath(){
+  ctx.beginPath();
+  ctx.moveTo(sausage[0].x, sausage[0].y);
+  for (let i = 1; i < sausage.length; i++) ctx.lineTo(sausage[i].x, sausage[i].y);
+}
+
+function drawFace(){
+  const a = sausage[0], b = sausage[1];
+  let dx = a.x - b.x, dy = a.y - b.y;
+  const len = Math.hypot(dx, dy) || 1;
+  dx /= len; dy /= len;
+  const px = -dy, py = dx;
+  const ex = a.x + dx * 3, ey = a.y + dy * 3;
+  for (const s of [1, -1]){
+    const x = ex + px * 6.5 * s;
+    const y = ey + py * 6.5 * s;
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath(); ctx.arc(x, y, 4.6, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#221018';
+    ctx.beginPath(); ctx.arc(x + dx * 1.5, y + dy * 1.5, 2.4, 0, Math.PI * 2); ctx.fill();
+  }
+}
+
+function drawSausage(){
+  if (state === 'dead' && stateTimer > 4) return;
+
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  ctx.strokeStyle = 'rgba(0,0,0,0.30)';
+  ctx.lineWidth = R * 2 + 8;
+  ctx.beginPath();
+  ctx.moveTo(sausage[0].x + 5, sausage[0].y + 8);
+  for (let i = 1; i < sausage.length; i++)
+    ctx.lineTo(sausage[i].x + 5, sausage[i].y + 8);
+  ctx.stroke();
+
+  ctx.strokeStyle = '#7d2e18';
+  ctx.lineWidth = R * 2 + 7;
+  sausagePath();
+  ctx.stroke();
+
+  ctx.strokeStyle = '#c8543a';
+  ctx.lineWidth = R * 2;
+  sausagePath();
+  ctx.stroke();
+
+  ctx.strokeStyle = 'rgba(255,185,145,0.55)';
+  ctx.lineWidth = R * 0.8;
+  ctx.beginPath();
+  ctx.moveTo(sausage[0].x, sausage[0].y - R * 0.42);
+  for (let i = 1; i < sausage.length; i++)
+    ctx.lineTo(sausage[i].x, sausage[i].y - R * 0.42);
+  ctx.stroke();
+
+  drawFace();
+}
+
+function drawAimLine(){
+  if (!pointer.down || pointer.grabbed < 0 || state !== 'play') return;
+  const p = sausage[pointer.grabbed];
+  const sp = Math.hypot(pointer.vx, pointer.vy);
+  if (sp < 1.5) return;
+
+  const k = Math.min(sp, 38) * 2.4;
+  const nx = pointer.vx / sp, ny = pointer.vy / sp;
+
+  ctx.save();
+  ctx.strokeStyle = 'rgba(255,220,120,0.75)';
+  ctx.lineWidth = 4;
+  ctx.setLineDash([10, 8]);
+  ctx.beginPath();
+  ctx.moveTo(p.x, p.y);
+  ctx.lineTo(p.x + nx * k, p.y + ny * k);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  const tx = p.x + nx * k, ty = p.y + ny * k;
+  const ang = Math.atan2(ny, nx);
+  ctx.fillStyle = 'rgba(255,220,120,0.9)';
+  ctx.beginPath();
+  ctx.moveTo(tx + Math.cos(ang) * 14, ty + Math.sin(ang) * 14);
+  ctx.lineTo(tx + Math.cos(ang + 2.5) * 11, ty + Math.sin(ang + 2.5) * 11);
+  ctx.lineTo(tx + Math.cos(ang - 2.5) * 11, ty + Math.sin(ang - 2.5) * 11);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawParticles(){
+  for (const p of particles){
+    ctx.globalAlpha = Math.max(0, p.life);
+    ctx.fillStyle = p.color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawUI(){
+  ctx.save();
+  ctx.textBaseline = 'top';
+  ctx.textAlign = 'left';
+  const uiScale = isMobile ? 1.15 : 1;
+  ctx.font = `bold ${20 * uiScale}px system-ui, -apple-system, sans-serif`;
+
+  ctx.fillStyle = 'rgba(255,255,255,0.92)';
+  ctx.fillText('Уровень ' + (levelIndex + 1) + ' / ' + LEVELS.length, 24, 18);
+
+  ctx.fillStyle = flingsLeft > 1 ? 'rgba(255,255,255,0.85)' : 'rgba(255,120,120,0.95)';
+  ctx.fillText('Броски: ' + Math.max(0, flingsLeft), 24, 18 + 30 * uiScale);
+
+  const got = drops.filter(d => d.got).length;
+  ctx.fillStyle = 'rgba(255,217,61,0.95)';
+  ctx.fillText('Горчица: ' + got + ' / ' + drops.length, 24, 18 + 60 * uiScale);
+
+  ctx.textAlign = 'center';
+
+  if (state === 'play' && !hasThrown && !isMobile){
+    ctx.globalAlpha = 0.55 + Math.sin(time * 0.08) * 0.25;
+    ctx.font = 'bold 22px system-ui, -apple-system, sans-serif';
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText('Тяни сосиску мышкой и отпусти — она полетит', W/2, 24);
+    ctx.globalAlpha = 1;
+  }
+
+  if (paused){
+    ctx.fillStyle = 'rgba(0,0,0,0.45)';
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#ffd93d';
+    ctx.font = 'bold 72px system-ui, -apple-system, sans-serif';
+    ctx.fillText('❚❚', W/2, H/2 - 60);
+    ctx.font = 'bold 28px system-ui, -apple-system, sans-serif';
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText('Пауза', W/2, H/2 + 40);
+  }
+
+  if (state === 'levelwin'){
+    ctx.font = 'bold 56px system-ui, -apple-system, sans-serif';
+    ctx.fillStyle = '#7bed9f';
+    ctx.fillText('Уровень пройден!', W/2, H/2 - 60);
+  }
+  if (state === 'dead'){
+    ctx.font = 'bold 56px system-ui, -apple-system, sans-serif';
+    ctx.fillStyle = '#ff7b7b';
+    ctx.fillText('Ой!', W/2, H/2 - 60);
+  }
+  if (state === 'lose'){
+    ctx.font = 'bold 46px system-ui, -apple-system, sans-serif';
+    ctx.fillStyle = '#ffb36b';
+    ctx.fillText('Броски кончились', W/2, H/2 - 60);
+    ctx.font = 'bold 22px system-ui, -apple-system, sans-serif';
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    ctx.fillText('Заново…', W/2, H/2 + 6);
+  }
+  if (state === 'gamewin'){
+    ctx.font = 'bold 64px system-ui, -apple-system, sans-serif';
+    ctx.fillStyle = '#ffd93d';
+    ctx.fillText('ПОБЕДА!', W/2, H/2 - 90);
+    ctx.font = 'bold 26px system-ui, -apple-system, sans-serif';
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText('Вся горчица собрана 🎉', W/2, H/2 - 10);
+    ctx.font = 'bold 22px system-ui, -apple-system, sans-serif';
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    ctx.fillText(isMobile ? 'Коснись, чтобы сыграть снова' : 'Кликни, чтобы сыграть снова', W/2, H/2 + 40);
+  }
+
+  ctx.restore();
+}
+
+function render(){
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  ctx.fillStyle = '#0d0810';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  const sx = shake ? rnd(-shake, shake) : 0;
+  const sy = shake ? rnd(-shake, shake) : 0;
+
+  ctx.save();
+  ctx.translate(offX + sx, offY + sy);
+  ctx.scale(scale, scale);
+
+  drawBackground();
+  drawPlatforms();
+  drawSpikes();
+  drawDrops();
+  drawSausage();
+  drawAimLine();
+  drawParticles();
+  drawUI();
+
+  ctx.restore();
+}
+
+// ============ ГЛАВНЫЙ ЦИКЛ ============
+let lastTime = performance.now();
+let acc = 0;
+const STEP = 1000 / 60;
+
+function loop(now){
+  let dt = now - lastTime;
+  lastTime = now;
+  if (dt > 120) dt = 120;
+  acc += dt;
+
+  let guard = 0;
+  while (acc >= STEP && guard < 5){
+    update();
+    acc -= STEP;
+    guard++;
+  }
+  if (guard >= 5) acc = 0;
+
+  render();
+  requestAnimationFrame(loop);
+}
+
+loadLevel(0);
+requestAnimationFrame(loop);
+
+})();
+</script>
+</body>
+</html>
