@@ -53,6 +53,7 @@
             display: block;
             margin: 10px auto;
             border-radius: 5px;
+            cursor: pointer;
         }
         .controls {
             text-align: center;
@@ -66,6 +67,7 @@
             border-radius: 5px;
             cursor: pointer;
             font-size: 16px;
+            margin: 2px;
             transition: background-color 0.2s;
         }
         button:hover {
@@ -77,6 +79,17 @@
             border-radius: 4px;
             width: 60px;
             text-align: center;
+        }
+        .settings-panel {
+            background-color: #e8f4fd;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            text-align: center;
+        }
+        .settings-panel label {
+            margin: 0 10px;
+            font-weight: bold;
         }
     </style>
 </head>
@@ -119,6 +132,25 @@
             </div>
         </div>
 
+        <!-- Игра 4: Сапер -->
+        <div class="game-card">
+            <h2>Сапер</h2>
+            <div class="settings-panel">
+                <label>Размер поля: 
+                    <input type="number" id="mineRows" value="10" min="5" max="20">
+                </label>
+                <label>Мин: 
+                    <input type="number" id="mineCount" value="15" min="10" max="100">
+                </label>
+                <button onclick="initMinesweeper()">Создать поле</button>
+            </div>
+            <canvas id="minesweeperCanvas"></canvas>
+            <div class="controls">
+                <p id="msStatus">Настройте поле и нажмите "Создать поле"</p>
+                <button onclick="initMinesweeper()">Новая игра</button>
+            </div>
+        </div>
+
     </div>
 </div>
 
@@ -134,12 +166,10 @@ function drawTicTacToe() {
     tttCtx.clearRect(0, 0, tttCanvas.width, tttCanvas.height);
     tttCtx.lineWidth = 4;
     tttCtx.strokeStyle = '#333';
-    // Линии поля
     tttCtx.beginPath(); tttCtx.moveTo(66, 0); tttCtx.lineTo(66, 200); tttCtx.stroke();
     tttCtx.beginPath(); tttCtx.moveTo(133, 0); tttCtx.lineTo(133, 200); tttCtx.stroke();
     tttCtx.beginPath(); tttCtx.moveTo(0, 66); tttCtx.lineTo(200, 66); tttCtx.stroke();
     tttCtx.beginPath(); tttCtx.moveTo(0, 133); tttCtx.lineTo(200, 133); tttCtx.stroke();
-    // Фигуры
     tttBoard.forEach((val, index) => {
         const x = (index % 3) * 66 + 33;
         const y = Math.floor(index / 3) * 66 + 33;
@@ -151,13 +181,10 @@ function drawTicTacToe() {
         } else if (val === 'O') {
             tttCtx.lineWidth = 6;
             tttCtx.strokeStyle = '#3498db';
-            tttCtx.beginPath();
-            tttCtx.arc(x, y, 25, 0, Math.PI * 2);
-            tttCtx.stroke();
+            tttCtx.beginPath(); tttCtx.arc(x, y, 25, 0, Math.PI * 2); tttCtx.stroke();
         }
     });
 }
-
 tttCanvas.addEventListener('click', (e) => {
     const rect = tttCanvas.getBoundingClientRect();
     const col = Math.floor((e.clientX - rect.left) / 66);
@@ -176,7 +203,6 @@ tttCanvas.addEventListener('click', (e) => {
     }
     drawTicTacToe();
 });
-
 function checkTTTWinner() {
     const lines = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
     for (let line of lines) {
@@ -187,7 +213,6 @@ function checkTTTWinner() {
     }
     return null;
 }
-
 function resetTicTacToe() {
     tttBoard.fill(null);
     tttCurrentPlayer = 'X';
@@ -224,7 +249,6 @@ const snakeCanvas = document.getElementById('snakeGame');
 const snakeCtx = snakeCanvas.getContext('2d');
 const snakeScore = document.getElementById('snakeScore');
 let snake, food, dx, dy, gameInterval;
-
 function startSnakeGame() {
     snake = [{x: 150, y: 150}, {x: 140, y: 150}, {x: 130, y: 150}];
     dx = 10; dy = 0;
@@ -234,7 +258,6 @@ function startSnakeGame() {
     gameInterval = setInterval(mainSnake, 100);
     document.addEventListener('keydown', changeDirectionSnake);
 }
-
 function mainSnake() {
     setTimeout(function() {
         clearCanvasSnake();
@@ -248,7 +271,6 @@ function mainSnake() {
         }
     }, 0);
 }
-
 function clearCanvasSnake() { snakeCtx.fillStyle = '#000'; snakeCtx.fillRect(0, 0, snakeCanvas.width, snakeCanvas.height); }
 function drawSnake() { snakeCtx.fillStyle = '#00FF00'; snake.forEach(part => snakeCtx.fillRect(part.x, part.y, 10, 10)); }
 function advanceSnake() {
@@ -262,13 +284,8 @@ function advanceSnake() {
     }
 }
 function randomFood() {
-    food = {
-        x: Math.floor(Math.random() * 30) * 10,
-        y: Math.floor(Math.random() * 30) * 10
-    };
-    if (snake.some(part => part.x === food.x && part.y === food.y)) {
-        randomFood();
-    }
+    food = {x: Math.floor(Math.random() * 30) * 10, y: Math.floor(Math.random() * 30) * 10};
+    if (snake.some(part => part.x === food.x && part.y === food.y)) randomFood();
 }
 function drawFoodSnake() { snakeCtx.fillStyle = '#FF0000'; snakeCtx.fillRect(food.x, food.y, 10, 10); }
 function changeDirectionSnake(e) {
@@ -288,9 +305,179 @@ function gameOverSnake() {
     return hitLeftWall || hitRightWall || hitTopWall || hitBottomWall || hitSelf;
 }
 
+/* === 4. Сапер === */
+const msCanvas = document.getElementById('minesweeperCanvas');
+const msCtx = msCanvas.getContext('2d');
+const msStatus = document.getElementById('msStatus');
+let mineField = [], mineRows = 10, mineCols = 10, mineTotal = 15;
+let cellSize = 30, revealedCount = 0, gameOver = false;
+
+function initMinesweeper() {
+    mineRows = parseInt(document.getElementById('mineRows').value);
+    mineTotal = parseInt(document.getElementById('mineCount').value);
+    if (mineTotal >= mineRows * mineRows) {
+        alert('Мин не может быть больше или равно количеству клеток. Уменьшите количество мин.');
+        document.getElementById('mineCount').value = Math.floor(mineRows * mineRows / 2);
+        mineTotal = parseInt(document.getElementById('mineCount').value);
+    }
+    mineCols = mineRows;
+    cellSize = Math.min(40, Math.floor(400 / mineRows));
+    msCanvas.width = mineCols * cellSize;
+    msCanvas.height = mineRows * cellSize;
+    
+    mineField = Array(mineRows).fill().map(() => Array(mineCols).fill({isMine: false, revealed: false, flagged: false, count: 0}));
+    placeMines();
+    calculateCounts();
+    revealedCount = 0;
+    gameOver = false;
+    drawMineField();
+    msStatus.textContent = `Поле ${mineRows}x${mineRows}. Мин: ${mineTotal}. ЛКМ - открыть, ПКМ - флаг.`;
+}
+
+function placeMines() {
+    let placed = 0;
+    while (placed < mineTotal) {
+        const r = Math.floor(Math.random() * mineRows);
+        const c = Math.floor(Math.random() * mineCols);
+        if (!mineField[r][c].isMine) {
+            mineField[r][c].isMine = true;
+            placed++;
+        }
+    }
+}
+
+function calculateCounts() {
+    for (let r = 0; r < mineRows; r++) {
+        for (let c = 0; c < mineCols; c++) {
+            if (mineField[r][c].isMine) continue;
+            let count = 0;
+            for (let i = -1; i <= 1; i++) {
+                for (let j = -1; j <= 1; j++) {
+                    const nr = r + i;
+                    const nc = c + j;
+                    if (nr >= 0 && nr < mineRows && nc >= 0 && nc < mineCols && mineField[nr][nc].isMine) {
+                        count++;
+                    }
+                }
+            }
+            mineField[r][c].count = count;
+        }
+    }
+}
+
+function drawMineField() {
+    msCtx.clearRect(0, 0, msCanvas.width, msCanvas.height);
+    for (let r = 0; r < mineRows; r++) {
+        for (let c = 0; c < mineCols; c++) {
+            const cell = mineField[r][c];
+            const x = c * cellSize;
+            const y = r * cellSize;
+            
+            if (cell.revealed) {
+                msCtx.fillStyle = cell.isMine ? '#FF4136' : '#eee';
+                msCtx.fillRect(x, y, cellSize, cellSize);
+                msCtx.strokeStyle = '#999';
+                msCtx.strokeRect(x, y, cellSize, cellSize);
+                if (!cell.isMine && cell.count > 0) {
+                    const colors = ['#444', '#0074D9', '#2ECC40', '#FF4136', '#FF851B', '#7FDBFF', '#39CCCC', '#3D9970', '#001f3f'];
+                    msCtx.fillStyle = colors[cell.count];
+                    msCtx.font = `${cellSize - 8}px Arial`;
+                    msCtx.textAlign = 'center';
+                    msCtx.textBaseline = 'middle';
+                    msCtx.fillText(cell.count, x + cellSize/2, y + cellSize/2);
+                }
+            } else {
+                msCtx.fillStyle = '#bbb';
+                msCtx.fillRect(x, y, cellSize, cellSize);
+                msCtx.strokeStyle = '#999';
+                msCtx.strokeRect(x, y, cellSize, cellSize);
+                if (cell.flagged) {
+                    msCtx.fillStyle = '#FFDC00';
+                    msCtx.beginPath();
+                    msCtx.moveTo(x + cellSize/2, y + 5);
+                    msCtx.lineTo(x + cellSize - 5, y + cellSize/2);
+                    msCtx.lineTo(x + cellSize/2, y + cellSize - 5);
+                    msCtx.fill();
+                }
+            }
+        }
+    }
+}
+
+msCanvas.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    if (gameOver) return;
+    const rect = msCanvas.getBoundingClientRect();
+    const c = Math.floor((e.clientX - rect.left) / cellSize);
+    const r = Math.floor((e.clientY - rect.top) / cellSize);
+    if (!mineField[r][c].revealed) {
+        mineField[r][c].flagged = !mineField[r][c].flagged;
+        drawMineField();
+    }
+});
+
+msCanvas.addEventListener('click', (e) => {
+    if (gameOver) return;
+    const rect = msCanvas.getBoundingClientRect();
+    const c = Math.floor((e.clientX - rect.left) / cellSize);
+    const r = Math.floor((e.clientY - rect.top) / cellSize);
+    const cell = mineField[r][c];
+    if (cell.flagged || cell.revealed) return;
+    
+    cell.revealed = true;
+    revealedCount++;
+    
+    if (cell.isMine) {
+        gameOver = true;
+        revealAllMines();
+        msStatus.textContent = 'Вы наступили на мину! Игра окончена.';
+        drawMineField();
+        return;
+    }
+    
+    if (cell.count === 0) {
+        floodFill(r, c);
+    }
+    
+    if (revealedCount === mineRows * mineCols - mineTotal) {
+        gameOver = true;
+        msStatus.textContent = 'Победа! Все клетки открыты!';
+    }
+    drawMineField();
+});
+
+function floodFill(r, c) {
+    if (r < 0 || r >= mineRows || c < 0 || c >= mineCols) return;
+    const cell = mineField[r][c];
+    if (cell.revealed || cell.isMine) return;
+    
+    cell.revealed = true;
+    revealedCount++;
+    
+    if (cell.count === 0) {
+        for (let i = -1; i <= 1; i++) {
+            for (let j = -1; j <= 1; j++) {
+                floodFill(r + i, c + j);
+            }
+        }
+    }
+}
+
+function revealAllMines() {
+    for (let r = 0; r < mineRows; r++) {
+        for (let c = 0; c < mineCols; c++) {
+            if (mineField[r][c].isMine) {
+                mineField[r][c].revealed = true;
+            }
+        }
+    }
+}
+
 /* === Инициализация === */
 drawTicTacToe();
 newNumberGame();
+startSnakeGame();
+initMinesweeper();
 </script>
 
 </body>
